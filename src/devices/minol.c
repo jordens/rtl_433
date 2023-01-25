@@ -23,11 +23,13 @@ Payload format:
 - Syncword          {32} 0xd391d391
 - Length            {8}
 - Payload           {n}
-- Checksum          {16} CRC16 poly=0x8005 init=0xffff
+- Checksum          {16} CRC16 poly=0x8005 init=0xffff of length and payload
+
+Payload and checksum are whitened with the PN9 sequence (see the CC1101 reference manual)
 
 To get raw data:
 
-    ./rtl_433 -f 868.3M -X 'name=minol,modulation=FSK_PCM,short=30.52,long=30.52,reset=100,preamble={32}d391d391'
+    ./rtl_433 -f 868.3M -X 'name=minol,modulation=FSK_PCM,short=30.52,long=30.52,reset=1000,preamble=d391d391'
 */
 
 #include "decoder.h"
@@ -140,7 +142,7 @@ static char *output_fields[] = {
 };
 
 r_device minol = {
-        .name        = "Minol",
+        .name        = "Minol smoke detectors, water/energy counters",
         .modulation  = FSK_PULSE_PCM,
         .short_width = 30.52,
         .long_width  = 30.52,
