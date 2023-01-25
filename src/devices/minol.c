@@ -9,8 +9,8 @@
     (at your option) any later version.
  */
 /**
-Decoder for Minol/Brunata smoke detectors (Minoprotect 4 radio),
-water, and heating energy (Minocal) counters. Maybe also others.
+Decoder for Minol/Brunata smoke detectors (Minoprotect, the recent ones aparently
+use LoRaWan though), water, and heating energy (Minocal) counters.
 
 - Modulation: FSK PCM
 - Frequency: 868.3MHz
@@ -18,14 +18,15 @@ water, and heating energy (Minocal) counters. Maybe also others.
 - Most likely based on TI CC1101 as it takes all the default settings
   (whitening poly, CRC poly, sync word)
 
-Payload format:
+Packet format:
 - Preamble          {32} 0xaaaaaaaa
 - Syncword          {32} 0xd391d391
 - Length            {8}
-- Payload           {n}
+- Payload           {Length*8}
 - Checksum          {16} CRC16 poly=0x8005 init=0xffff of length and payload
 
-Payload and checksum are whitened with the PN9 sequence (see the CC1101 reference manual)
+Payload and Checksum are whitened with the PN9 LFSR sequence from the CC1101
+reference manual.
 
 To get raw data:
 
@@ -49,11 +50,13 @@ static int minol_decode(r_device *decoder, bitbuffer_t *bitbuffer)
 
     int row = 0;
     // Validate message and reject it as fast as possible: check for preamble
-    unsigned start_pos = bitbuffer_search(bitbuffer, row, 0, preamble, sizeof (preamble) * 8);
+    unsigned pos = bitbuffer_search(bitbuffer, row, 0, preamble, sizeof (preamble) * 8);
 
-    if (start_pos == bitbuffer->bits_per_row[row]) {
+    if (pos == bitbuffer->bits_per_row[row]) {
         return DECODE_ABORT_EARLY; // no preamble detected
     }
+
+    pos += sizeof (preamble) * 8;
 
     // check min length
     if (bitbuffer->bits_per_row[row] < (sizeof (preamble) + 1 /* len */ + 2 /* crc */) * 8) {
@@ -61,16 +64,15 @@ static int minol_decode(r_device *decoder, bitbuffer_t *bitbuffer)
     }
 
     uint8_t len;
-    bitbuffer_extract_bytes(bitbuffer, row, start_pos + sizeof (preamble) * 8, &len, 8);
+    bitbuffer_extract_bytes(bitbuffer, row, pos, &len, 8);
 
-    uint8_t frame[256 + 2] = {len}; // CC1101 max packet payload size plus len plus CRC
-    // Get frame (len don't include the length byte and the crc16 bytes)
-    bitbuffer_extract_bytes(bitbuffer, row,
-            start_pos + (sizeof (preamble) + 1) * 8,
-            frame, (len + 2) * 8);
+    pos += 8;
 
-    // CC1101 PN9 whitening sequence (LFSR poly 0x21, init 0x1ff)
-    uint8_t const pn9[256] = {
+    uint8_t frame[1 + 256 + 2] = {len}; // len, max payload, CRC
+    bitbuffer_extract_bytes(bitbuffer, row, pos, &frame[1], (len + 2) * 8);
+
+    // CC1101 PN9 whitening sequence (LFSR poly 0x21, init 0xff)
+    uint8_t const pn9[258] = {
         0xff, 0xe1, 0x1d, 0x9a, 0xed, 0x85, 0x33, 0x24,
         0xea, 0x7a, 0xd2, 0x39, 0x70, 0x97, 0x57, 0x0a,
         0x54, 0x7d, 0x2d, 0xd8, 0x6d, 0x0d, 0xba, 0x8f,
@@ -103,9 +105,10 @@ static int minol_decode(r_device *decoder, bitbuffer_t *bitbuffer)
         0x91, 0x9b, 0xde, 0xb0, 0xca, 0x09, 0x23, 0x04,
         0x88, 0x98, 0xb8, 0xda, 0x38, 0x52, 0xb1, 0xf9,
         0x3c, 0xda, 0x29, 0x41, 0xe6, 0xe2, 0x7b, 0xf0,
+        0x1f, 0xde,
     };
 
-    for (int i = 0; i < len; ++i) {
+    for (int i = 0; i < len + 2; ++i) {
         frame[i + 1] ^= pn9[i];
     }
 
